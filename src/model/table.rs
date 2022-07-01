@@ -102,6 +102,8 @@ pub struct SnapshotLog {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
+    use std::fs::File;
+    use std::io::BufReader;
 
     use super::TableMetadataV2;
 
@@ -187,5 +189,20 @@ mod tests {
         "#;
         assert!(serde_json::from_str::<TableMetadataV2>(&data).is_err());
         Ok(())
+    }
+
+    fn table_metadata_round_trip(metadata: &TableMetadataV2) {
+        let metadata2: TableMetadataV2 =
+            serde_json::from_str(&serde_json::to_string(&metadata).unwrap()).unwrap();
+        assert_eq!(metadata, &metadata2);
+    }
+
+    #[test]
+    fn test_table_metadata_v2() {
+        let file = File::open("test/data/TableMetadataV2Valid.json").unwrap();
+        let reader = BufReader::new(file);
+
+        let metadata: TableMetadataV2 = serde_json::from_reader(reader).unwrap();
+        table_metadata_round_trip(&metadata);
     }
 }

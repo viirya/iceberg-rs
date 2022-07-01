@@ -181,6 +181,7 @@ pub struct StructField {
     pub name: String,
     /// Optional or required, meaning that values can (or can not be null)
     pub required: bool,
+    #[serde(rename = "type")]
     /// Field can have any type
     pub field_type: AllType,
     /// Fields can have any optional comment or doc string.
