@@ -287,7 +287,7 @@ mod tests {
             "id" : 1,
             "name": "struct_name",
             "required": true,
-            "field_type": "decimal(1,1)"
+            "type": "decimal(1,1)"
         }
         "#;
         let result_struct = serde_json::from_str::<StructField>(data).unwrap();
@@ -304,7 +304,7 @@ mod tests {
             "id" : 1,
             "name": "struct_name",
             "required": true,
-            "field_type": "decimal(1,1000)"
+            "type": "decimal(1,1000)"
         }
         "#;
         assert!(serde_json::from_str::<StructField>(invalid_decimal_data).is_err());
@@ -317,7 +317,7 @@ mod tests {
             "id" : 1,
             "name": "struct_name",
             "required": true,
-            "field_type": "boolean"
+            "type": "boolean"
         }
         "#;
         let result_struct = serde_json::from_str::<StructField>(data).unwrap();
@@ -334,7 +334,7 @@ mod tests {
             "id" : 1,
             "name": "struct_name",
             "required": true,
-            "field_type": "fixed[1]"
+            "type": "fixed[1]"
         }
         "#;
         let result_struct = serde_json::from_str::<StructField>(data).unwrap();
@@ -348,7 +348,7 @@ mod tests {
             "id" : 1,
             "name": "struct_name",
             "required": true,
-            "field_type": "fixed[0.1]"
+            "type": "fixed[0.1]"
         }
         "#;
         assert!(serde_json::from_str::<StructField>(invalid_fixed_data).is_err());
@@ -402,7 +402,7 @@ mod tests {
                     "id" : 1,
                     "name": "struct_name",
                     "required": true,
-                    "field_type": "fixed[1]"
+                    "type": "fixed[1]"
                 }
             ],
             "name-mapping": {

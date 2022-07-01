@@ -24,7 +24,7 @@ let data = r#"
                         "id": 1,
                         "name": "struct_name",
                         "required": true,
-                        "field_type": "fixed[1]"
+                        "type": "fixed[1]"
                     }
                 ]
             }
