@@ -3,6 +3,7 @@ Defines the [table metadata](https://iceberg.apache.org/spec/#table-metadata).
 The main struct here is [TableMetadataV2] which defines the data for a table.
 */
 use std::collections::HashMap;
+use anyhow::anyhow;
 
 use crate::model::{
     partition::PartitionSpec,
@@ -12,6 +13,32 @@ use crate::model::{
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// Metadata of an iceberg table
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum TableMetadata {
+    /// Version 2 of the table metadata
+    V2(TableMetadataV2),
+}
+
+/// Format version for iceberg table
+pub enum FormatVersion {
+    /// Iceberg v2 spec
+    V2
+}
+
+impl TryFrom<u8> for FormatVersion {
+    type Error = anyhow::Error;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match char::from_u32(value as u32)
+            .ok_or_else(|| anyhow!("Failed to convert u8 to char."))?
+        {
+            '2' => Ok(FormatVersion::V2),
+            value => Err(anyhow!("Unsupported FormatVersion: {}.", value)),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case", tag = "format-version")]
@@ -38,14 +65,14 @@ pub struct TableMetadataV2 {
     pub default_spec_id: i32,
     /// An integer; the highest assigned partition field ID across all partition specs for the table.
     pub last_partition_id: i32,
-    ///A string to string map of table properties. This is used to control settings that
+    /// A string to string map of table properties. This is used to control settings that
     /// affect reading and writing and is not intended to be used for arbitrary metadata.
     /// For example, commit.retry.num-retries is used to control the number of commit retries.
     pub properties: Option<HashMap<String, String>>,
     /// long ID of the current table snapshot; must be the same as the current
     /// ID of the main branch in refs.
     pub current_snapshot_id: Option<i64>,
-    ///A list of valid snapshots. Valid snapshots are snapshots for which all
+    /// A list of valid snapshots. Valid snapshots are snapshots for which all
     /// data files exist in the file system. A data file must not be deleted
     /// from the file system until the last snapshot in which it was listed is
     /// garbage collected.
@@ -72,7 +99,7 @@ pub struct TableMetadataV2 {
     /// writers, but is not used when reading because reads use the specs
     /// stored in manifest files.
     pub default_sort_order_id: i64,
-    ///A map of snapshot references. The map keys are the unique snapshot reference
+    /// A map of snapshot references. The map keys are the unique snapshot reference
     /// names in the table, and the map values are snapshot reference objects.
     /// There is always a main branch reference pointing to the current-snapshot-id
     /// even if the refs map is null.
