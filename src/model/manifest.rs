@@ -8,7 +8,6 @@ use std::{
 
 use std::ops::Deref;
 
-use crate::model::schema::Struct;
 use crate::model::table::FormatVersion;
 use crate::model::values::IcebergValue;
 use anyhow::{anyhow, Context, Error, Result};
@@ -19,8 +18,6 @@ use serde::{
 };
 use serde_bytes::ByteBuf;
 use serde_repr::{Deserialize_repr, Serialize_repr};
-
-use super::partition::PartitionField;
 
 /// A manifest file is an immutable Avro file that lists data files or delete files, along with
 /// each file's partition data tuple, metrics, and tracking information.
@@ -267,47 +264,6 @@ pub struct PartitionValues {
     lookup: BTreeMap<String, usize>,
 }
 
-impl PartitionValues {
-    /// Get the schema of the partition value struct depending on the partition spec and the table schema
-    pub fn schema(spec: &[PartitionField], table_schema: &Struct) -> Result<String> {
-        Ok(spec
-            .iter()
-            .map(|field| {
-                let schema_field = table_schema
-                    .get(field.source_id as usize)
-                    .ok_or_else(|| anyhow!("Column {} not in table schema.", &field.source_id))?;
-                Ok::<_, anyhow::Error>(
-                    r#"
-                {
-                    "name": ""#
-                        .to_owned()
-                        + &field.name
-                        + r#"",
-                    "field_id": "#
-                        + &format!("{}", &field.field_id)
-                        + r#",
-                    "type":  ["null",""#
-                        + &format!("{}", &schema_field.field_type)
-                        + r#""],
-                    "default": null
-                },"#,
-                )
-            })
-            .fold(
-                Ok::<String, anyhow::Error>(
-                    r#"{"type": "record","name": "r102","fields": ["#.to_owned(),
-                ),
-                |acc, x| {
-                    let result = acc? + &x?;
-                    Ok(result)
-                },
-            )?
-            .trim_end_matches(',')
-            .to_owned()
-            + r#"]}"#)
-    }
-}
-
 impl Deref for PartitionValues {
     type Target = [Option<IcebergValue>];
 
@@ -470,7 +426,6 @@ pub struct DataFileV2 {
     /// ID representing sort order for this file
     pub sort_order_id: Option<i32>,
 }
-
 
 impl DataFileV2 {
     /// Get schema
@@ -897,19 +852,13 @@ mod tests {
                 }],
             };
 
-            let partition_schema = PartitionValues::schema(&spec.fields, &table_schema.struct_fields).unwrap();
+            let partition_schema = spec.schema(&table_schema.struct_fields).unwrap();
 
             let raw_schema = ManifestEntry::schema(&partition_schema, &FormatVersion::V2);
 
             let schema = apache_avro::Schema::parse_str(&raw_schema).unwrap();
 
-            // TODO: make this a correct partition spec
-            let partition_spec = r#"[{
-                "source-id": 4,
-                "field-id": 1000,
-                "name": "date",
-                "transform": "day"
-              }]"#;
+            let partition_spec = spec.to_json(&table_schema.struct_fields).unwrap();
             let partition_spec_id = "0";
             // TODO: make this a correct schema
             let table_schema = r#"{"schema": "0"}"#;
@@ -972,19 +921,14 @@ mod tests {
                 }],
             };
 
-            let partition_schema = PartitionValues::schema(&spec.fields, &table_schema.struct_fields).unwrap();
+            let partition_schema = spec.schema(&table_schema.struct_fields).unwrap();
 
             let raw_schema = ManifestEntry::schema(&partition_schema, &FormatVersion::V2);
 
             let schema = apache_avro::Schema::parse_str(&raw_schema).unwrap();
 
             // TODO: make this a correct partition spec
-            let partition_spec = r#"[{
-                "source-id": 4,
-                "field-id": 1000,
-                "name": "date",
-                "transform": "day"
-              }]"#;
+            let partition_spec = spec.to_json(&table_schema.struct_fields).unwrap();
             let partition_spec_id = "0";
             // TODO: make this a correct schema
             let table_schema = r#"{"schema": "0"}"#;
@@ -996,7 +940,7 @@ mod tests {
                 std::collections::HashMap::from_iter(vec![
                     ("schema".to_string(), AvroValue::Bytes(table_schema.into())),
                     ("schema-id".to_string(), AvroValue::Bytes(table_schema_id.into())),
-                    ("partition-spec".to_string(), AvroValue::Bytes(partition_spec.into())),
+                    ("partition-spec".to_string(), AvroValue::Bytes(partition_spec.clone().into())),
                     ("partition-spec-id".to_string(), AvroValue::Bytes(partition_spec_id.into())),
                     ("format-version".to_string(), AvroValue::Bytes(vec![u8::from(format_version.clone())])),
                     ("content".to_string(), AvroValue::Bytes(content.into()))
@@ -1048,19 +992,13 @@ mod tests {
                 }],
             };
 
-            let partition_schema = PartitionValues::schema(&spec.fields, &table_schema.struct_fields).unwrap();
+            let partition_schema = spec.schema(&table_schema.struct_fields).unwrap();
 
             let raw_schema = ManifestEntry::schema(&partition_schema, &FormatVersion::V2);
 
             let schema = apache_avro::Schema::parse_str(&raw_schema).unwrap();
 
-            // TODO: make this a correct partition spec
-            let partition_spec = r#"[{
-                "source-id": 4,
-                "field-id": 1000,
-                "name": "date",
-                "transform": "day"
-              }]"#;
+            let partition_spec = spec.to_json(&table_schema.struct_fields).unwrap();
             let partition_spec_id = "0";
             // TODO: make this a correct schema
             let table_schema = r#"{"schema": "0"}"#;
@@ -1123,8 +1061,7 @@ mod tests {
             }],
         };
 
-        let raw_schema =
-            PartitionValues::schema(&spec.fields, &table_schema.struct_fields).unwrap();
+        let raw_schema = spec.schema(&table_schema.struct_fields).unwrap();
 
         dbg!(&raw_schema);
 

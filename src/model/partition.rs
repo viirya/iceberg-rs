@@ -5,6 +5,8 @@ from the source fields.
 The [PartitionSpec] is composed of multiple [PartitionField] each of which together define how
 the [TableMetadataV2](crate::model::table::TableMetadataV2) is partitioned.
 */
+use crate::model::schema::Struct;
+use anyhow::anyhow;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{
@@ -135,6 +137,82 @@ pub struct PartitionSpec {
     pub spec_id: i32,
     /// Fields for the specification
     pub fields: Vec<PartitionField>,
+}
+
+impl PartitionSpec {
+    /// Get the schema of the partition value struct depending on the partition spec and the table schema
+    pub fn schema(&self, table_schema: &Struct) -> Result<String, anyhow::Error> {
+        Ok(self
+            .fields
+            .iter()
+            .map(|field| {
+                let schema_field = table_schema
+                    .get(field.source_id as usize)
+                    .ok_or_else(|| anyhow!("Column {} not in table schema.", &field.source_id))?;
+                Ok::<_, anyhow::Error>(
+                    r#"
+                {
+                    "name": ""#
+                        .to_owned()
+                        + &field.name
+                        + r#"",
+                    "field_id": "#
+                        + &format!("{}", &field.field_id)
+                        + r#",
+                    "type":  ["null",""#
+                        + &format!("{}", &schema_field.field_type)
+                        + r#""],
+                    "default": null
+                },"#,
+                )
+            })
+            .fold(
+                Ok::<String, anyhow::Error>(
+                    r#"{"type": "record","name": "r102","fields": ["#.to_owned(),
+                ),
+                |acc, x| {
+                    let result = acc? + &x?;
+                    Ok(result)
+                },
+            )?
+            .trim_end_matches(',')
+            .to_owned()
+            + r#"]}"#)
+    }
+
+    /// Get the JSON representation of this partition spec.
+    pub fn to_json(&self, table_schema: &Struct) -> Result<String, anyhow::Error> {
+        Ok(self
+            .fields
+            .iter()
+            .map(|field| {
+                let schema_field = table_schema
+                    .get(field.source_id as usize)
+                    .ok_or_else(|| anyhow!("Column {} not in table schema.", &field.source_id))?;
+                Ok::<_, anyhow::Error>(
+                    r#"
+                {
+                    "name": ""#
+                        .to_owned()
+                        + &field.name
+                        + r#"",
+                    "field_id": "#
+                        + &format!("{}", &field.field_id)
+                        + r#",
+                    "type":  ["null",""#
+                        + &format!("{}", &schema_field.field_type)
+                        + r#""],
+                    "default": null
+                },"#,
+                )
+            })
+            .fold(Ok::<String, anyhow::Error>("".to_string()), |acc, x| {
+                let result = acc? + &x?;
+                Ok(result)
+            })?
+            .trim_end_matches(',')
+            .to_owned())
+    }
 }
 
 #[cfg(test)]
