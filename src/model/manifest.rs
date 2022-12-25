@@ -28,11 +28,65 @@ pub struct Manifest {
     pub entry: ManifestEntry,
 }
 
+impl Manifest {
+    /// Read a manifest
+    pub fn read_manifest<R: std::io::Read>(r: R) -> Result<Manifest> {
+        let mut reader = apache_avro::Reader::new(r)?;
+
+        let metadata = ManifestMetadata::read_from_avro(&reader)?;
+        let entry = ManifestEntry::read_from_avro(&mut reader)?;
+        Ok(Manifest { metadata, entry })
+    }
+}
+
 /// Lists data files or delete files, along with each file’s
 /// partition data tuple, metrics, and tracking information.
 pub enum ManifestMetadata {
     /// V2 spec iceberg manifest metadata
     V2(ManifestMetadataV2),
+}
+
+impl ManifestMetadata {
+    /// Read metadata from the avro reader
+    pub fn read_from_avro<R: std::io::Read>(
+        reader: &apache_avro::Reader<R>,
+    ) -> Result<ManifestMetadata> {
+        let read_string = |key: &str| {
+            reader
+                .user_metadata()
+                .get(key)
+                .map(|id| String::from_utf8(id.to_vec()).map_err(anyhow::Error::from))
+                .transpose()
+        };
+
+        let format_version: Option<FormatVersion> = reader
+            .user_metadata()
+            .get("format-version")
+            .and_then(|n| n[0].try_into().ok());
+        match format_version {
+            Some(FormatVersion::V2) => {
+                let schema = read_string("schema")?.context("Metadata must have table schema")?;
+                let schema_id = read_string("schema-id")?.unwrap();
+                let partition_spec = read_string("partition-spec")?.unwrap();
+                let partition_spec_id = read_string("partition-spec-id")?.unwrap();
+                let content: Content = reader
+                    .user_metadata()
+                    .get("content")
+                    .and_then(|n| n.clone().try_into().ok())
+                    .unwrap();
+
+                Ok(ManifestMetadata::V2(ManifestMetadataV2 {
+                    schema,
+                    schema_id,
+                    partition_spec,
+                    partition_spec_id,
+                    format_version: format_version.unwrap(),
+                    content,
+                }))
+            }
+            None => Err(Error::msg("No format-version in the file. Invalid format.")),
+        }
+    }
 }
 
 /// Lists data files or delete files, along with each file’s
@@ -73,6 +127,21 @@ pub enum Status {
 pub enum ManifestEntry {
     /// Manifest entry version 2
     V2(ManifestEntryV2),
+}
+
+impl ManifestEntry {
+    /// Read manifest entry from the avro reader
+    pub fn read_from_avro<R: std::io::Read>(
+        reader: &mut apache_avro::Reader<R>,
+    ) -> Result<ManifestEntry> {
+        let record = reader
+            .into_iter()
+            .next()
+            .context("Manifest Entry Expected")??;
+        apache_avro::from_value::<ManifestEntryV2>(&record)
+            .map(ManifestEntry::V2)
+            .map_err(anyhow::Error::msg)
+    }
 }
 
 /// Entry in manifest with the iceberg spec version 2.
@@ -716,60 +785,9 @@ impl DataFileV2 {
 pub fn read_manifest<R: std::io::Read>(r: R) -> Result<Manifest> {
     let mut reader = apache_avro::Reader::new(r)?;
 
-    let metadata = read_metadata(&reader)?;
-    let entry = read_manifest_entry(&mut reader)?;
+    let metadata = ManifestMetadata::read_from_avro(&reader)?;
+    let entry = ManifestEntry::read_from_avro(&mut reader)?;
     Ok(Manifest { metadata, entry })
-}
-
-/// Read metadata from the avro reader
-fn read_metadata<R: std::io::Read>(reader: &apache_avro::Reader<R>) -> Result<ManifestMetadata> {
-    let read_string = |key: &str| {
-        reader
-            .user_metadata()
-            .get(key)
-            .map(|id| String::from_utf8(id.to_vec()).map_err(anyhow::Error::from))
-            .transpose()
-    };
-
-    let format_version: Option<FormatVersion> = reader
-        .user_metadata()
-        .get("format-version")
-        .and_then(|n| n[0].try_into().ok());
-    match format_version {
-        Some(FormatVersion::V2) => {
-            let schema = read_string("schema")?.context("Metadata must have table schema")?;
-            let schema_id = read_string("schema-id")?.unwrap();
-            let partition_spec = read_string("partition-spec")?.unwrap();
-            let partition_spec_id = read_string("partition-spec-id")?.unwrap();
-            let content: Content = reader
-                .user_metadata()
-                .get("content")
-                .and_then(|n| n.clone().try_into().ok())
-                .unwrap();
-
-            Ok(ManifestMetadata::V2(ManifestMetadataV2 {
-                schema,
-                schema_id,
-                partition_spec,
-                partition_spec_id,
-                format_version: format_version.unwrap(),
-                content,
-            }))
-        }
-        None => Err(Error::msg("No format-version in the file. Invalid format.")),
-    }
-}
-
-fn read_manifest_entry<R: std::io::Read>(
-    reader: &mut apache_avro::Reader<R>,
-) -> Result<ManifestEntry> {
-    let record = reader
-        .into_iter()
-        .next()
-        .context("Manifest Entry Expected")??;
-    apache_avro::from_value::<ManifestEntryV2>(&record)
-        .map(ManifestEntry::V2)
-        .map_err(anyhow::Error::msg)
 }
 
 #[cfg(test)]
@@ -927,7 +945,6 @@ mod tests {
 
             let schema = apache_avro::Schema::parse_str(&raw_schema).unwrap();
 
-            // TODO: make this a correct partition spec
             let partition_spec = spec.to_json(&table_schema.struct_fields).unwrap();
             let partition_spec_id = "0";
             // TODO: make this a correct schema
@@ -956,7 +973,7 @@ mod tests {
             let encoded = writer.into_inner().unwrap();
 
             let reader = apache_avro::Reader::new( &encoded[..]).unwrap();
-            let ManifestMetadata::V2(metadata) = read_metadata(&reader).unwrap();
+            let ManifestMetadata::V2(metadata) = ManifestMetadata::read_from_avro(&reader).unwrap();
             assert_eq!(metadata.schema, table_schema.to_string());
             assert_eq!(metadata.schema_id, table_schema_id.to_string());
             assert_eq!(metadata.partition_spec, partition_spec.to_string());
@@ -1026,7 +1043,7 @@ mod tests {
             let encoded = writer.into_inner().unwrap();
 
             let mut reader = apache_avro::Reader::new( &encoded[..]).unwrap();
-            let metadata_entry = read_manifest_entry(&mut reader).unwrap();
+            let metadata_entry = ManifestEntry::read_from_avro(&mut reader).unwrap();
             assert_eq!(a, metadata_entry);
         }
     }

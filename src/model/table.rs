@@ -22,6 +22,31 @@ pub enum TableMetadata {
     V2(TableMetadataV2),
 }
 
+impl TableMetadata {
+    /// Get the manifest_list for the current snapshot of the table
+    pub fn manifest_list(&self) -> Option<&str> {
+        match self {
+            TableMetadata::V2(metadata) => metadata
+                .snapshots
+                .as_ref()
+                .zip(metadata.current_snapshot_id.as_ref())
+                .and_then(|(snapshots, id)| {
+                    snapshots
+                        .iter()
+                        .find(|snapshot| snapshot.snapshot_id == *id)
+                        .map(|snapshot| snapshot.manifest_list.as_str())
+                }),
+        }
+    }
+
+    /// Get the format version of the table
+    pub fn format_version(&self) -> FormatVersion {
+        match self {
+            TableMetadata::V2(_) => FormatVersion::V2,
+        }
+    }
+}
+
 /// Format version for iceberg table
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FormatVersion {
