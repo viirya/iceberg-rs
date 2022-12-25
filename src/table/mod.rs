@@ -2,9 +2,9 @@
 Iceberg table.
  */
 
-use std::sync::Arc;
-use object_store::ObjectStore;
 use crate::model::table::TableMetadata;
+use object_store::ObjectStore;
+use std::sync::Arc;
 
 /// Tables can be either one of following types:
 /// - FileSystem (https://iceberg.apache.org/spec/#file-system-tables)

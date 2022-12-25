@@ -8,6 +8,9 @@ use std::{
 
 use std::ops::Deref;
 
+use crate::model::schema::Struct;
+use crate::model::table::FormatVersion;
+use crate::model::values::IcebergValue;
 use anyhow::{anyhow, Context, Error, Result};
 use serde::{
     de::{DeserializeOwned, MapAccess, Visitor},
@@ -16,13 +19,8 @@ use serde::{
 };
 use serde_bytes::ByteBuf;
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use crate::model::schema::Struct;
-use crate::model::table::FormatVersion;
-use crate::model::values::{IcebergValue};
 
-use super::{
-    partition::PartitionField,
-};
+use super::partition::PartitionField;
 
 /// A manifest file is an immutable Avro file that lists data files or delete files, along with
 /// each file's partition data tuple, metrics, and tracking information.
@@ -228,8 +226,8 @@ pub enum FileFormat {
 /// Decimal and Fixed types.
 impl Serialize for FileFormat {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
+    where
+        S: serde::Serializer,
     {
         use FileFormat::*;
         match self {
@@ -244,8 +242,8 @@ impl Serialize for FileFormat {
 /// Decimal and Fixed types.
 impl<'de> Deserialize<'de> for FileFormat {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
+    where
+        D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
         if s == "AVRO" {
@@ -285,7 +283,8 @@ impl PartitionValues {
                         .to_owned()
                         + &field.name
                         + r#"",
-                    "field_id": "# + &format!("{}", &field.field_id)
+                    "field_id": "#
+                        + &format!("{}", &field.field_id)
                         + r#",
                     "type":  ["null",""#
                         + &format!("{}", &schema_field.field_type)
@@ -333,8 +332,8 @@ impl FromIterator<(String, Option<IcebergValue>)> for PartitionValues {
 
 impl Serialize for PartitionValues {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
+    where
+        S: serde::Serializer,
     {
         let mut record = serializer.serialize_struct("r102", self.fields.len())?;
         for (i, value) in self.fields.iter().enumerate() {
@@ -347,8 +346,8 @@ impl Serialize for PartitionValues {
 
 impl<'de> Deserialize<'de> for PartitionValues {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
+    where
+        D: Deserializer<'de>,
     {
         struct PartitionStructVisitor;
 
@@ -360,8 +359,8 @@ impl<'de> Deserialize<'de> for PartitionValues {
             }
 
             fn visit_map<V>(self, mut map: V) -> Result<PartitionValues, V::Error>
-                where
-                    V: MapAccess<'de>,
+            where
+                V: MapAccess<'de>,
             {
                 let mut fields: Vec<Option<IcebergValue>> = Vec::new();
                 let mut lookup: BTreeMap<String, usize> = BTreeMap::new();
@@ -402,8 +401,8 @@ impl<T: Serialize + Clone> core::ops::Deref for AvroMap<T> {
 
 impl<T: Serialize + Clone> Serialize for AvroMap<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
+    where
+        S: serde::Serializer,
     {
         let entries = self
             .0
@@ -423,8 +422,8 @@ impl<T: Serialize + Clone> Serialize for AvroMap<T> {
 
 impl<'de, T: Serialize + DeserializeOwned + Clone> Deserialize<'de> for AvroMap<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
+    where
+        D: serde::Deserializer<'de>,
     {
         let vec: Vec<KeyValue<T>> = Vec::deserialize(deserializer)?;
         Ok(AvroMap(HashMap::from_iter(
@@ -472,364 +471,6 @@ pub struct DataFileV2 {
     pub sort_order_id: Option<i32>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-/// DataFile found in Manifest.
-pub struct DataFileV1 {
-    /// Full URI for the file with a FS scheme.
-    pub file_path: String,
-    /// String file format name, avro, orc or parquet
-    pub file_format: FileFormat,
-    /// Partition data tuple, schema based on the partition spec output using partition field ids for the struct field ids
-    pub partition: PartitionValues,
-    /// Number of records in this file
-    pub record_count: i64,
-    /// Total file size in bytes
-    pub file_size_in_bytes: i64,
-    /// Block size
-    pub block_size_in_bytes: i64,
-    /// File ordinal
-    pub file_ordinal: Option<i32>,
-    /// Columns to sort
-    pub sort_columns: Option<Vec<i32>>,
-    /// Map from column id to total size on disk
-    pub column_sizes: Option<AvroMap<i64>>,
-    /// Map from column id to number of values in the column (including null and NaN values)
-    pub value_counts: Option<AvroMap<i64>>,
-    /// Map from column id to number of null values
-    pub null_value_counts: Option<AvroMap<i64>>,
-    /// Map from column id to number of NaN values
-    pub nan_value_counts: Option<AvroMap<i64>>,
-    /// Map from column id to number of distinct values in the column.
-    pub distinct_counts: Option<AvroMap<i64>>,
-    /// Map from column id to lower bound in the column
-    pub lower_bounds: Option<AvroMap<ByteBuf>>,
-    /// Map from column id to upper bound in the column
-    pub upper_bounds: Option<AvroMap<ByteBuf>>,
-    /// Implementation specific key metadata for encryption
-    pub key_metadata: Option<ByteBuf>,
-    /// Split offsets for the data file.
-    pub split_offsets: Option<Vec<i64>>,
-    /// ID representing sort order for this file
-    pub sort_order_id: Option<i32>,
-}
-
-impl From<DataFileV1> for DataFileV2 {
-    fn from(v1: DataFileV1) -> Self {
-        DataFileV2 {
-            content: Content::Data,
-            file_path: v1.file_path,
-            file_format: v1.file_format,
-            partition: v1.partition,
-            record_count: v1.record_count,
-            file_size_in_bytes: v1.file_size_in_bytes,
-            column_sizes: v1.column_sizes,
-            value_counts: v1.value_counts,
-            null_value_counts: v1.null_value_counts,
-            nan_value_counts: v1.nan_value_counts,
-            distinct_counts: v1.distinct_counts,
-            lower_bounds: v1.lower_bounds,
-            upper_bounds: v1.upper_bounds,
-            key_metadata: v1.key_metadata,
-            split_offsets: v1.split_offsets,
-            equality_ids: None,
-            sort_order_id: v1.sort_order_id,
-        }
-    }
-}
-
-impl DataFileV1 {
-    /// Get schema
-    pub fn schema(partition_schema: &str) -> String {
-        r#"{
-            "type": "record",
-            "name": "r2",
-            "fields": [
-                {
-                    "name": "file_path",
-                    "type": "string",
-                    "field_id": 100
-                },
-                {
-                    "name": "file_format",
-                    "type": "string",
-                    "field_id": 101
-                },
-                {
-                    "name": "partition",
-                    "type": "#
-            .to_owned()
-            + partition_schema
-            + r#",
-                    "field_id": 102
-                },
-                {
-                    "name": "record_count",
-                    "type": "long",
-                    "field_id": 103
-                },
-                {
-                    "name": "file_size_in_bytes",
-                    "type": "long",
-                    "field_id": 104
-                },
-                {
-                    "name": "block_size_in_bytes",
-                    "type": "long"
-                    "field_id": 105
-                },
-                {
-                    "name": "file_ordinal",
-                    "type": [
-                        "null",
-                        "int"
-                    ],
-                    "default": null,
-                    "field_id": 106
-                },
-                {
-                    "name": "sort_columns",
-                    "type": [
-                        "null",
-                        {
-                            "type": "array",
-                            "items": "int",
-                            "element-id": 112
-                        }
-                    ],
-                    "default": null,
-                    "field_id": 107
-                },
-                {
-                    "name": "column_sizes",
-                    "type": [
-                        "null",
-                        {
-                            "type": "array",
-                            "logicalType": "map",
-                            "items": {
-                                "type": "record",
-                                "name": "k117_v118",
-                                "fields": [
-                                    {
-                                        "name": "key",
-                                        "type": "int",
-                                        "field-id": 117
-                                    },
-                                    {
-                                        "name": "value",
-                                        "type": "long",
-                                        "field-id": 118
-                                    }
-                                ]
-                            }
-                        }
-                    ],
-                    "default": null,
-                    "field_id": 108
-                },
-                {
-                    "name": "value_counts",
-                    "type": [
-                        "null",
-                        {
-                            "type": "array",
-                            "logicalType": "map",
-                            "items": {
-                                "type": "record",
-                                "name": "k119_v120",
-                                "fields": [
-                                    {
-                                        "name": "key",
-                                        "type": "int",
-                                        "field-id": 119
-                                    },
-                                    {
-                                        "name": "value",
-                                        "type": "long",
-                                        "field-id": 120
-                                    }
-                                ]
-                            }
-                        }
-                    ],
-                    "default": null,
-                    "field_id": 109
-                },
-                {
-                    "name": "null_value_counts",
-                    "type": [
-                        "null",
-                        {
-                            "type": "array",
-                            "logicalType": "map",
-                            "items": {
-                                "type": "record",
-                                "name": "k121_v122",
-                                "fields": [
-                                    {
-                                        "name": "key",
-                                        "type": "int",
-                                        "field-id": 121
-                                    },
-                                    {
-                                        "name": "value",
-                                        "type": "long",
-                                        "field-id": 122
-                                    }
-                                ]
-                            }
-                        }
-                    ],
-                    "default": null,
-                    "field_id": 110
-                },
-                {
-                    "name": "nan_value_counts",
-                    "type": [
-                        "null",
-                        {
-                            "type": "array",
-                            "logicalType": "map",
-                            "items": {
-                                "type": "record",
-                                "name": "k138_v139",
-                                "fields": [
-                                    {
-                                        "name": "key",
-                                        "type": "int",
-                                        "field-id": 138
-                                    },
-                                    {
-                                        "name": "value",
-                                        "type": "long",
-                                        "field-id": 139
-                                    }
-                                ]
-                            }
-                        }
-                    ],
-                    "default": null,
-                    "field_id": 137
-                },
-                {
-                    "name": "distinct_counts",
-                    "type": [
-                        "null",
-                        {
-                            "type": "array",
-                            "logicalType": "map",
-                            "items": {
-                                "type": "record",
-                                "name": "k123_v124",
-                                "fields": [
-                                    {
-                                        "name": "key",
-                                        "type": "int",
-                                        "field-id": 123
-                                    },
-                                    {
-                                        "name": "value",
-                                        "type": "long",
-                                        "field-id": 124
-                                    }
-                                ]
-                            }
-                        }
-                    ],
-                    "default": null,
-                    "field_id": 111
-                },
-                {
-                    "name": "lower_bounds",
-                    "type": [
-                        "null",
-                        {
-                            "type": "array",
-                            "logicalType": "map",
-                            "items": {
-                                "type": "record",
-                                "name": "k126_v127",
-                                "fields": [
-                                    {
-                                        "name": "key",
-                                        "type": "int",
-                                        "field-id": 126
-                                    },
-                                    {
-                                        "name": "value",
-                                        "type": "bytes",
-                                        "field-id": 127
-                                    }
-                                ]
-                            }
-                        }
-                    ],
-                    "default": null,
-                    "field_id": 125
-                },
-                {
-                    "name": "upper_bounds",
-                    "type": [
-                        "null",
-                        {
-                            "type": "array",
-                            "logicalType": "map",
-                            "items": {
-                                "type": "record",
-                                "name": "k129_v130",
-                                "fields": [
-                                    {
-                                        "name": "key",
-                                        "type": "int",
-                                        "field-id": 129
-                                    },
-                                    {
-                                        "name": "value",
-                                        "type": "bytes",
-                                        "field-id": 130
-                                    }
-                                ]
-                            }
-                        }
-                    ],
-                    "default": null,
-                    "field_id": 128
-                },
-                {
-                    "name": "key_metadata",
-                    "type": [
-                        "null",
-                        "bytes"
-                    ],
-                    "default": null,
-                    "field_id": 131
-                },
-                {
-                    "name": "split_offsets",
-                    "type": [
-                        "null",
-                        {
-                            "type": "array",
-                            "items": "long",
-                            "element-id": 133
-                        }
-                    ],
-                    "default": null,
-                    "field_id": 132
-                },
-                {
-                    "name": "sort_order_id",
-                    "type": [
-                        "null",
-                        "int"
-                    ],
-                    "default": null,
-                    "field_id": 140
-                }
-            ]
-        }"#
-    }
-}
 
 impl DataFileV2 {
     /// Get schema
@@ -1160,7 +801,7 @@ fn read_metadata<R: std::io::Read>(reader: &apache_avro::Reader<R>) -> Result<Ma
                 content,
             }))
         }
-        None => Err(Error::msg("No format-version in the file. Invalid format."))
+        None => Err(Error::msg("No format-version in the file. Invalid format.")),
     }
 }
 
@@ -1180,7 +821,7 @@ fn read_manifest_entry<R: std::io::Read>(
 mod tests {
     use crate::model::{
         partition::{PartitionField, PartitionSpec, Transform},
-        schema::{AllType, PrimitiveType, Struct, SchemaV2, StructField},
+        schema::{AllType, PrimitiveType, SchemaV2, Struct, StructField},
     };
 
     use super::*;
@@ -1193,6 +834,263 @@ mod tests {
             Just(Status::Added),
             Just(Status::Deleted),
         ]
+    }
+
+    prop_compose! {
+        fn arb_manifest_entry()(status in status_strategy(),
+            snapshot_id in prop::option::of(any::<i64>()),
+            sequence_number in prop::option::of(any::<i64>())
+        )  -> ManifestEntry {
+            ManifestEntry::V2(ManifestEntryV2{
+                status,
+                snapshot_id,
+                sequence_number,
+                data_file: DataFileV2 {
+                    content: Content::Data,
+                    file_path: "/".to_string(),
+                    file_format: FileFormat::Parquet,
+                    partition: PartitionValues::from_iter(vec![("ts_day".to_owned(), Some(IcebergValue::Int(1)))]),
+                    record_count: 4,
+                    file_size_in_bytes: 1200,
+                    column_sizes: None,
+                    value_counts: None,
+                    null_value_counts: None,
+                    nan_value_counts: None,
+                    distinct_counts: None,
+                    lower_bounds: Some(AvroMap(HashMap::from_iter(vec![(0,ByteBuf::from(vec![0,0,0,0]))]))),
+                    upper_bounds: None,
+                    key_metadata: None,
+                    split_offsets: None,
+                    equality_ids: None,
+                    sort_order_id: None,
+                }
+            })
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_manifest_entry(a in arb_manifest_entry()) {
+
+            let table_schema = SchemaV2 {
+                schema_id: 0,
+                identifier_field_ids: None,
+                name_mapping: None,
+                struct_fields: Struct {
+                    fields: vec![StructField {
+                        id: 4,
+                        name: "day".to_owned(),
+                        required: false,
+                        field_type: AllType::Primitive(PrimitiveType::Int),
+                        doc: None,
+                    }],
+                },
+            };
+
+            let spec = PartitionSpec {
+                spec_id: 0,
+                fields: vec![PartitionField {
+                    source_id: 4,
+                    field_id: 1000,
+                    name: "ts_day".to_string(),
+                    transform: Transform::Day,
+                }],
+            };
+
+            let partition_schema = PartitionValues::schema(&spec.fields, &table_schema.struct_fields).unwrap();
+
+            let raw_schema = ManifestEntry::schema(&partition_schema, &FormatVersion::V2);
+
+            let schema = apache_avro::Schema::parse_str(&raw_schema).unwrap();
+
+            // TODO: make this a correct partition spec
+            let partition_spec = r#"[{
+                "source-id": 4,
+                "field-id": 1000,
+                "name": "date",
+                "transform": "day"
+              }]"#;
+            let partition_spec_id = "0";
+            // TODO: make this a correct schema
+            let table_schema = r#"{"schema": "0"}"#;
+            let table_schema_id = "1";
+            let format_version = FormatVersion::V2;
+            let content = "DATA";
+
+            let meta: std::collections::HashMap<String, apache_avro::types::Value> =
+                std::collections::HashMap::from_iter(vec![
+                    ("schema".to_string(), AvroValue::Bytes(table_schema.into())),
+                    ("schema-id".to_string(), AvroValue::Bytes(table_schema_id.into())),
+                    ("partition-spec".to_string(), AvroValue::Bytes(partition_spec.into())),
+                    ("partition-spec-id".to_string(), AvroValue::Bytes(partition_spec_id.into())),
+                    ("format-version".to_string(), AvroValue::Bytes(vec![u8::from(format_version)])),
+                    ("content".to_string(), AvroValue::Bytes(content.into()))
+                    ],
+                );
+            let mut writer = apache_avro::Writer::builder()
+            .schema(&schema)
+            .writer(vec![])
+            .user_metadata(meta)
+            .build();
+            writer.append_ser(a.clone()).unwrap();
+
+            let encoded = writer.into_inner().unwrap();
+
+            let reader = apache_avro::Reader::new( &encoded[..]).unwrap();
+
+            for value in reader {
+                let entry = apache_avro::from_value::<ManifestEntryV2>(&value.unwrap()).map(|entry| ManifestEntry::V2(entry)).unwrap();
+                assert_eq!(a, entry)
+            }
+
+        }
+
+        #[test]
+        fn test_read_manifest(a in arb_manifest_entry()) {
+            let table_schema = SchemaV2 {
+                schema_id: 0,
+                identifier_field_ids: None,
+                name_mapping: None,
+                struct_fields: Struct {
+                    fields: vec![StructField {
+                        id: 4,
+                        name: "day".to_owned(),
+                        required: false,
+                        field_type: AllType::Primitive(PrimitiveType::Int),
+                        doc: None,
+                    }],
+                },
+            };
+
+            let spec = PartitionSpec {
+                spec_id: 0,
+                fields: vec![PartitionField {
+                    source_id: 4,
+                    field_id: 1000,
+                    name: "ts_day".to_string(),
+                    transform: Transform::Day,
+                }],
+            };
+
+            let partition_schema = PartitionValues::schema(&spec.fields, &table_schema.struct_fields).unwrap();
+
+            let raw_schema = ManifestEntry::schema(&partition_schema, &FormatVersion::V2);
+
+            let schema = apache_avro::Schema::parse_str(&raw_schema).unwrap();
+
+            // TODO: make this a correct partition spec
+            let partition_spec = r#"[{
+                "source-id": 4,
+                "field-id": 1000,
+                "name": "date",
+                "transform": "day"
+              }]"#;
+            let partition_spec_id = "0";
+            // TODO: make this a correct schema
+            let table_schema = r#"{"schema": "0"}"#;
+            let table_schema_id = "1";
+            let format_version = FormatVersion::V2;
+            let content = "DATA";
+
+            let meta: std::collections::HashMap<String, apache_avro::types::Value> =
+                std::collections::HashMap::from_iter(vec![
+                    ("schema".to_string(), AvroValue::Bytes(table_schema.into())),
+                    ("schema-id".to_string(), AvroValue::Bytes(table_schema_id.into())),
+                    ("partition-spec".to_string(), AvroValue::Bytes(partition_spec.into())),
+                    ("partition-spec-id".to_string(), AvroValue::Bytes(partition_spec_id.into())),
+                    ("format-version".to_string(), AvroValue::Bytes(vec![u8::from(format_version.clone())])),
+                    ("content".to_string(), AvroValue::Bytes(content.into()))
+                    ],
+                );
+            let mut writer = apache_avro::Writer::builder()
+            .schema(&schema)
+            .writer(vec![])
+            .user_metadata(meta)
+            .build();
+            writer.append_ser(a.clone()).unwrap();
+
+            let encoded = writer.into_inner().unwrap();
+
+            let reader = apache_avro::Reader::new( &encoded[..]).unwrap();
+            let ManifestMetadata::V2(metadata) = read_metadata(&reader).unwrap();
+            assert_eq!(metadata.schema, table_schema.to_string());
+            assert_eq!(metadata.schema_id, table_schema_id.to_string());
+            assert_eq!(metadata.partition_spec, partition_spec.to_string());
+            assert_eq!(metadata.partition_spec_id, partition_spec_id.to_string());
+            assert_eq!(metadata.format_version, format_version);
+        }
+
+        #[test]
+        fn test_read_manifest_entry(a in arb_manifest_entry()) {
+
+            let table_schema = SchemaV2 {
+                schema_id: 0,
+                identifier_field_ids: None,
+                name_mapping: None,
+                struct_fields: Struct {
+                    fields: vec![StructField {
+                        id: 4,
+                        name: "day".to_owned(),
+                        required: false,
+                        field_type: AllType::Primitive(PrimitiveType::Int),
+                        doc: None,
+                    }],
+                },
+            };
+
+            let spec = PartitionSpec {
+                spec_id: 0,
+                fields: vec![PartitionField {
+                    source_id: 4,
+                    field_id: 1000,
+                    name: "ts_day".to_string(),
+                    transform: Transform::Day,
+                }],
+            };
+
+            let partition_schema = PartitionValues::schema(&spec.fields, &table_schema.struct_fields).unwrap();
+
+            let raw_schema = ManifestEntry::schema(&partition_schema, &FormatVersion::V2);
+
+            let schema = apache_avro::Schema::parse_str(&raw_schema).unwrap();
+
+            // TODO: make this a correct partition spec
+            let partition_spec = r#"[{
+                "source-id": 4,
+                "field-id": 1000,
+                "name": "date",
+                "transform": "day"
+              }]"#;
+            let partition_spec_id = "0";
+            // TODO: make this a correct schema
+            let table_schema = r#"{"schema": "0"}"#;
+            let table_schema_id = "1";
+            let format_version = "1";
+            let content = "DATA";
+
+            let meta: std::collections::HashMap<String, apache_avro::types::Value> =
+                std::collections::HashMap::from_iter(vec![
+                    ("schema".to_string(), AvroValue::Bytes(table_schema.into())),
+                    ("schema-id".to_string(), AvroValue::Bytes(table_schema_id.into())),
+                    ("partition-spec".to_string(), AvroValue::Bytes(partition_spec.into())),
+                    ("partition-spec-id".to_string(), AvroValue::Bytes(partition_spec_id.into())),
+                    ("format-version".to_string(), AvroValue::Bytes(format_version.into())),
+                    ("content".to_string(), AvroValue::Bytes(content.into()))
+                    ],
+                );
+            let mut writer = apache_avro::Writer::builder()
+            .schema(&schema)
+            .writer(vec![])
+            .user_metadata(meta)
+            .build();
+            writer.append_ser(a.clone()).unwrap();
+
+            let encoded = writer.into_inner().unwrap();
+
+            let mut reader = apache_avro::Reader::new( &encoded[..]).unwrap();
+            let metadata_entry = read_manifest_entry(&mut reader).unwrap();
+            assert_eq!(a, metadata_entry);
+        }
     }
 
     #[test]

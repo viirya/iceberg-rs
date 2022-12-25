@@ -2,8 +2,8 @@
 Defines the [table metadata](https://iceberg.apache.org/spec/#table-metadata).
 The main struct here is [TableMetadataV2] which defines the data for a table.
 */
-use std::collections::HashMap;
 use anyhow::anyhow;
+use std::collections::HashMap;
 
 use crate::model::{
     partition::PartitionSpec,
@@ -23,9 +23,10 @@ pub enum TableMetadata {
 }
 
 /// Format version for iceberg table
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FormatVersion {
     /// Iceberg v2 spec
-    V2
+    V2,
 }
 
 impl TryFrom<u8> for FormatVersion {
@@ -36,6 +37,14 @@ impl TryFrom<u8> for FormatVersion {
         {
             '2' => Ok(FormatVersion::V2),
             value => Err(anyhow!("Unsupported FormatVersion: {}.", value)),
+        }
+    }
+}
+
+impl From<FormatVersion> for u8 {
+    fn from(value: FormatVersion) -> Self {
+        match value {
+            FormatVersion::V2 => '2' as u8,
         }
     }
 }

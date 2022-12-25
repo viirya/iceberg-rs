@@ -2,13 +2,13 @@
 A table’s [schema](https://iceberg.apache.org/spec/#schemas-and-data-types) is a list of named columns, represented by [SchemaV2].
 All data types are either [primitives](PrimitiveType) or nested types, which are [Map], [List], or [Struct]. A table [SchemaV2] is also a [Struct] type.
 */
-use std::fmt;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{
     de::{self, IntoDeserializer},
     Deserialize, Deserializer, Serialize,
 };
+use std::fmt;
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

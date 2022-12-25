@@ -2,11 +2,11 @@
  * Types in iceberg
  */
 
+use anyhow::{ensure, Result};
 use std::{
     collections::{BTreeMap, HashMap},
     ops::Index,
 };
-use anyhow::{ensure, Result};
 
 use serde::{Deserialize, Serialize};
 
