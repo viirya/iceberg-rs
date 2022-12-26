@@ -2,8 +2,11 @@
 Defines the [table metadata](https://iceberg.apache.org/spec/#table-metadata).
 The main struct here is [TableMetadataV2] which defines the data for a table.
 */
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
+use object_store::ObjectStore;
 use std::collections::HashMap;
+use std::io::Cursor;
+use std::sync::Arc;
 
 use crate::model::{
     partition::PartitionSpec,
@@ -23,6 +26,24 @@ pub enum TableMetadata {
 }
 
 impl TableMetadata {
+    /// Reads metadata file from provided location and object store.
+    pub async fn get_metadata(
+        location: &str,
+        object_store: &Arc<dyn ObjectStore>,
+    ) -> Result<TableMetadata> {
+        let bytes: Cursor<Vec<u8>> = Cursor::new(
+            object_store
+                .get(&location.into())
+                .await
+                .map_err(anyhow::Error::msg)?
+                .bytes()
+                .await?
+                .into(),
+        );
+        let metadata: TableMetadataV2 = serde_json::from_reader(bytes)?;
+        Ok(TableMetadata::V2(metadata))
+    }
+
     /// Get the manifest_list for the current snapshot of the table
     pub fn manifest_list(&self) -> Option<&str> {
         match self {
@@ -162,9 +183,13 @@ pub struct SnapshotLog {
 
 #[cfg(test)]
 mod tests {
+    use crate::model::table::TableMetadata;
     use anyhow::Result;
+    use object_store::local::LocalFileSystem;
+    use object_store::DynObjectStore;
     use std::fs::File;
     use std::io::BufReader;
+    use std::sync::Arc;
 
     use super::TableMetadataV2;
 
@@ -264,6 +289,18 @@ mod tests {
         let reader = BufReader::new(file);
 
         let metadata: TableMetadataV2 = serde_json::from_reader(reader).unwrap();
+        table_metadata_round_trip(&metadata);
+    }
+
+    #[tokio::test()]
+    async fn test_table_metadata_v2_from_object_store() {
+        let object_store: Arc<DynObjectStore> =
+            Arc::new(LocalFileSystem::new_with_prefix("test/data").unwrap());
+        let TableMetadata::V2(metadata) =
+            TableMetadata::get_metadata("TableMetadataV2Valid.json", &object_store)
+                .await
+                .unwrap();
+
         table_metadata_round_trip(&metadata);
     }
 }

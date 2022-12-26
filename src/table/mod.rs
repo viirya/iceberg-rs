@@ -4,6 +4,7 @@ Iceberg table.
 
 use crate::model::manifest_list::{ManifestFile, ManifestFileV2};
 use crate::model::table::{FormatVersion, TableMetadata};
+use crate::table::TableType::FileSystem;
 use anyhow::Result;
 use apache_avro::types::Value;
 use object_store::ObjectStore;
@@ -27,12 +28,28 @@ pub struct Table {
 }
 
 impl Table {
+    /// Returns filesystem table from given metadata location.
+    pub async fn get_table_from_metadata_location(
+        metadata_location: &str,
+        fs: Arc<dyn ObjectStore>,
+    ) -> Result<Table> {
+        let metadata = TableMetadata::get_metadata(metadata_location, &fs).await?;
+        let manifests = Table::get_manifests(&metadata, &fs).await?;
+
+        Ok(Self {
+            table_type: FileSystem(fs),
+            metadata,
+            metadata_location: metadata_location.to_string(),
+            manifests,
+        })
+    }
+
     /// Return all manifest files associated to the latest table snapshot.
     /// Reads the related manifest_list file and returns its entries.
     /// If the manifest list file is empty returns an empty vector.
     pub(crate) async fn get_manifests(
         metadata: &TableMetadata,
-        object_store: Arc<dyn ObjectStore>,
+        object_store: &Arc<dyn ObjectStore>,
     ) -> Result<Vec<ManifestFile>> {
         match metadata.manifest_list() {
             Some(manifest_list) => {
