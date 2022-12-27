@@ -8,10 +8,24 @@ use crate::model::table::{FormatVersion, TableMetadata};
 use crate::table::TableType::FileSystem;
 use anyhow::Result;
 use apache_avro::types::Value;
-use futures::future::join_all;
-use object_store::{DynObjectStore, ObjectStore};
+use arrow_array::RecordBatch;
+use futures::executor::block_on;
+use futures::future::{join_all, BoxFuture};
+use futures::ready;
+use futures::stream::BoxStream;
+use futures::stream::Stream;
+use futures::FutureExt;
+use futures::StreamExt;
+use object_store::{DynObjectStore, ObjectMeta, ObjectStore};
+use parquet::arrow::arrow_reader::ArrowReaderBuilder;
+use parquet::arrow::async_reader::{AsyncReader, ParquetObjectReader};
+use parquet::arrow::ParquetRecordBatchStreamBuilder;
+use parquet::errors::ParquetError;
+use std::fmt::Formatter;
 use std::io::Cursor;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 /// Tables can be either one of following types:
 /// - FileSystem (https://iceberg.apache.org/spec/#file-system-tables)
@@ -110,6 +124,18 @@ impl Table {
         Ok(parquet_files)
     }
 
+    /// Reads parquet files as a stream of arrow `RecordBatch`es.
+    pub async fn read_batches(
+        &self,
+    ) -> Result<impl Stream<Item = core::result::Result<RecordBatch, ParquetError>>> {
+        Ok(ParquetRecordBatchesStream {
+            files: self.get_parquet_files().await?.into_iter(),
+            object_store: self.get_filesystem()?.clone(),
+            base_location: self.metadata.location().to_string(),
+            state: StreamState::Init,
+        })
+    }
+
     /// Return all manifest files associated to the latest table snapshot.
     /// Reads the related manifest_list file and returns its entries.
     /// If the manifest list file is empty returns an empty vector.
@@ -161,10 +187,130 @@ fn read_manifest_file_from_avro(
         .map_err(anyhow::Error::msg)
 }
 
+/// An asynchronous [`Stream`] of [`RecordBatch`] for parquet files.
+pub struct ParquetRecordBatchesStream<I: Iterator<Item = String>> {
+    files: I,
+    object_store: Arc<DynObjectStore>,
+    base_location: String,
+    state: StreamState,
+}
+
+impl<I: Iterator<Item = String>> Unpin for ParquetRecordBatchesStream<I> {}
+
+enum StreamState {
+    Init,
+    Streaming(BoxStream<'static, core::result::Result<RecordBatch, ParquetError>>),
+    ReadingObject(ObjectMeta),
+    Reading(
+        BoxFuture<
+            'static,
+            core::result::Result<
+                ArrowReaderBuilder<AsyncReader<ParquetObjectReader>>,
+                ParquetError,
+            >,
+        >,
+    ),
+}
+
+impl std::fmt::Debug for StreamState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StreamState::Init => write!(f, "StreamState::Init"),
+            StreamState::Streaming(_) => write!(f, "StreamState::Streaming"),
+            StreamState::ReadingObject(_) => write!(f, "StreamState::ReadingObject"),
+            StreamState::Reading(_) => write!(f, "StreamState::Reading"),
+        }
+    }
+}
+
+impl<I> Stream for ParquetRecordBatchesStream<I>
+where
+    I: Iterator<Item = String>,
+{
+    type Item = core::result::Result<RecordBatch, ParquetError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            let object_store = self.object_store.clone();
+            match &mut self.state {
+                StreamState::Init => {
+                    // Read next file if present.
+                    let next = self.files.next();
+                    if let Some(file) = next {
+                        let relative_path = file.trim_start_matches(&self.base_location).into();
+                        let future = object_store.head(&relative_path);
+                        let object_metadata = block_on(future);
+
+                        match object_metadata {
+                            Ok(object_metadata) => {
+                                self.state = StreamState::ReadingObject(object_metadata);
+
+                                let waker = cx.waker().clone();
+                                waker.wake();
+
+                                return Poll::Pending;
+                            }
+                            Err(err) => {
+                                return Poll::Ready(Some(Err(ParquetError::General(
+                                    err.to_string(),
+                                ))));
+                            }
+                        }
+                    } else {
+                        return Poll::Ready(None);
+                    }
+                }
+                StreamState::Streaming(stream) => match ready!(stream.poll_next_unpin(cx)) {
+                    None => {
+                        self.state = StreamState::Init;
+                        let waker = cx.waker().clone();
+                        waker.wake();
+                        return Poll::Pending;
+                    }
+                    Some(next_batch) => match next_batch {
+                        Ok(batch) => return Poll::Ready(Some(Ok(batch))),
+                        Err(err) => return Poll::Ready(Some(Err(err))),
+                    },
+                },
+                StreamState::ReadingObject(object_metadata) => {
+                    let object_reader =
+                        ParquetObjectReader::new(object_store, object_metadata.clone());
+                    let builder = ParquetRecordBatchStreamBuilder::new(object_reader).boxed();
+
+                    self.state = StreamState::Reading(builder);
+                    let waker = cx.waker().clone();
+                    waker.wake();
+                    return Poll::Pending;
+                }
+                StreamState::Reading(builder) => match ready!(builder.poll_unpin(cx)) {
+                    Ok(builder) => match builder.build() {
+                        Ok(reader) => {
+                            self.state = StreamState::Streaming(reader.boxed());
+                            let waker = cx.waker().clone();
+                            waker.wake();
+                            return Poll::Pending;
+                        }
+                        Err(err) => {
+                            return Poll::Ready(Some(Err(err)));
+                        }
+                    },
+                    Err(err) => {
+                        return Poll::Ready(Some(Err(ParquetError::General(err.to_string()))))
+                    }
+                },
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::model::table::FormatVersion;
     use crate::table::Table;
+    use arrow_array::cast::{as_primitive_array, as_string_array};
+    use arrow_array::types::Int64Type;
+    use arrow_array::Array;
+    use futures::TryStreamExt;
     use object_store::local::LocalFileSystem;
     use object_store::DynObjectStore;
     use std::sync::Arc;
@@ -193,5 +339,29 @@ mod tests {
         let table = Table::get_filesystem_table(2, object_store).await.unwrap();
         let files = table.get_parquet_files().await.unwrap();
         assert_eq!(files.len(), 1);
+    }
+
+    #[tokio::test()]
+    async fn test_read_parquet_files_as_batches() {
+        let object_store: Arc<DynObjectStore> =
+            Arc::new(LocalFileSystem::new_with_prefix("test/data/table1").unwrap());
+
+        let table = Table::get_filesystem_table(2, object_store).await.unwrap();
+        let stream = table.read_batches().await.unwrap();
+        let result = stream.try_collect::<Vec<_>>().await.unwrap();
+        assert_eq!(result.len(), 1);
+
+        let batch = &result[0];
+        let column1 = batch.column(0);
+        let column2 = batch.column(1);
+
+        let int_array = as_primitive_array::<Int64Type>(column1);
+        let string_array = as_string_array(column2);
+
+        assert_eq!(int_array.len(), 1);
+        assert_eq!(int_array.value(0), 1);
+
+        assert_eq!(string_array.len(), 1);
+        assert_eq!(string_array.value(0), "a");
     }
 }
