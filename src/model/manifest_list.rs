@@ -50,11 +50,13 @@ pub struct ManifestFileV2 {
     /// ID of the snapshot where the manifest file was added
     pub added_snapshot_id: i64,
     /// Number of entries in the manifest that have status ADDED (1), when null this is assumed to be non-zero
-    pub added_files_count: i32,
+    /// Question: In https://iceberg.apache.org/spec/#table-metadata, it is `added_files_count`, but in the actual
+    /// avro written by Iceberg Spark, it is `added_data_files_count`.
+    pub added_data_files_count: i32,
     /// Number of entries in the manifest that have status EXISTING (0), when null this is assumed to be non-zero
-    pub existing_files_count: i32,
+    pub existing_data_files_count: i32,
     /// Number of entries in the manifest that have status DELETED (2), when null this is assumed to be non-zero
-    pub deleted_files_count: i32,
+    pub deleted_data_files_count: i32,
     /// Number of rows in all of files in the manifest that have status ADDED, when null this is assumed to be non-zero
     pub added_rows_count: i64,
     /// Number of rows in all of files in the manifest that have status EXISTING, when null this is assumed to be non-zero
@@ -113,17 +115,17 @@ impl ManifestFile {
                     "field_id": 503
                 },
                 {
-                    "name": "added_files_count",
+                    "name": "added_data_files_count",
                     "type": "int",
                     "field_id": 504
                 },
                 {
-                    "name": "existing_files_count",
+                    "name": "existing_data_files_count",
                     "type": "int",
                     "field_id": 505
                 },
                 {
-                    "name": "deleted_files_count",
+                    "name": "deleted_data_files_count",
                     "type": "int",
                     "field_id": 506
                 },
@@ -222,9 +224,9 @@ impl ManifestFile {
         }
     }
     /// Number of entries in the manifest that have status ADDED (1), when null this is assumed to be non-zero
-    pub fn added_files_count(&self) -> std::option::Option<i32> {
+    pub fn added_data_files_count(&self) -> std::option::Option<i32> {
         match self {
-            ManifestFile::V2(file) => Some(file.added_files_count),
+            ManifestFile::V2(file) => Some(file.added_data_files_count),
         }
     }
 }
@@ -244,9 +246,9 @@ mod tests {
             sequence_number: 566,
             min_sequence_number: 0,
             added_snapshot_id: 39487483032,
-            added_files_count: 1,
-            existing_files_count: 2,
-            deleted_files_count: 0,
+            added_data_files_count: 1,
+            existing_data_files_count: 2,
+            deleted_data_files_count: 0,
             added_rows_count: 1000,
             existing_rows_count: 8000,
             deleted_rows_count: 0,

@@ -60,6 +60,13 @@ impl TableMetadata {
         }
     }
 
+    /// Returns the location of the table.
+    pub fn location(&self) -> &str {
+        match self {
+            TableMetadata::V2(metadata) => metadata.location.as_str(),
+        }
+    }
+
     /// Get the format version of the table
     pub fn format_version(&self) -> FormatVersion {
         match self {

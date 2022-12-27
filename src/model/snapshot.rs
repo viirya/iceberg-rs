@@ -85,20 +85,20 @@ pub enum Retention {
     Branch {
         /// A positive number for the minimum number of snapshots to keep in a
         /// branch while expiring snapshots.
-        min_snapshots_to_keep: i32,
+        min_snapshots_to_keep: Option<i32>,
         /// A positive number for the max age of snapshots to keep when expiring,
         /// including the latest snapshot.
-        max_snapshot_age_ms: i64,
+        max_snapshot_age_ms: Option<i64>,
         /// A positive number for the max age of the snapshot reference to
         /// keep while expiring snapshots.
-        max_ref_age_ms: i64,
+        max_ref_age_ms: Option<i64>,
     },
     #[serde(rename_all = "kebab-case")]
     /// A tag reference.
     Tag {
         /// A positive number for the max age of the snapshot reference to
         /// keep while expiring snapshots.
-        max_ref_age_ms: i64,
+        max_ref_age_ms: Option<i64>,
     },
 }
 
@@ -155,9 +155,9 @@ mod tests {
     #[test]
     fn test_retention_branch() {
         let retention = Retention::Branch {
-            min_snapshots_to_keep: 1,
-            max_snapshot_age_ms: 1,
-            max_ref_age_ms: 1,
+            min_snapshots_to_keep: Some(1),
+            max_snapshot_age_ms: Some(1),
+            max_ref_age_ms: Some(1),
         };
         let json = serde_json::to_string(&retention).unwrap();
         let result: Retention = serde_json::from_str(&json).unwrap();
@@ -166,7 +166,9 @@ mod tests {
 
     #[test]
     fn test_retention_tag() {
-        let retention = Retention::Tag { max_ref_age_ms: 1 };
+        let retention = Retention::Tag {
+            max_ref_age_ms: Some(1),
+        };
         let json = serde_json::to_string(&retention).unwrap();
         let result: Retention = serde_json::from_str(&json).unwrap();
         assert!(matches!(result, Retention::Tag { .. }))

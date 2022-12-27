@@ -21,19 +21,24 @@ pub enum TableType {
 
 /// Iceberg table
 pub struct Table {
+    #[allow(dead_code)]
     table_type: TableType,
+    #[allow(dead_code)]
     metadata: TableMetadata,
+    #[allow(dead_code)]
     metadata_location: String,
+    #[allow(dead_code)]
     manifests: Vec<ManifestFile>,
 }
 
+/// The metadata folder name under table base location.
+const METADATA_FOLDER: &str = "metadata";
+
 impl Table {
     /// Returns filesystem table from given metadata location.
-    pub async fn get_table_from_metadata_location(
-        metadata_location: &str,
-        fs: Arc<dyn ObjectStore>,
-    ) -> Result<Table> {
-        let metadata = TableMetadata::get_metadata(metadata_location, &fs).await?;
+    pub async fn get_filesystem_table(version: u64, fs: Arc<dyn ObjectStore>) -> Result<Table> {
+        let metadata_location = format!("{METADATA_FOLDER}/v{version}.metadata.json");
+        let metadata = TableMetadata::get_metadata(&metadata_location, &fs).await?;
         let manifests = Table::get_manifests(&metadata, &fs).await?;
 
         Ok(Self {
@@ -53,9 +58,11 @@ impl Table {
     ) -> Result<Vec<ManifestFile>> {
         match metadata.manifest_list() {
             Some(manifest_list) => {
+                let relative_path = manifest_list.trim_start_matches(metadata.location());
+
                 let bytes: Cursor<Vec<u8>> = Cursor::new(
                     object_store
-                        .get(&manifest_list.into())
+                        .get(&relative_path.into())
                         .await
                         .map_err(anyhow::Error::msg)?
                         .bytes()
@@ -91,4 +98,29 @@ fn read_manifest_file_from_avro(
             }
         })
         .map_err(anyhow::Error::msg)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::model::table::FormatVersion;
+    use crate::table::Table;
+    use object_store::local::LocalFileSystem;
+    use object_store::DynObjectStore;
+    use std::sync::Arc;
+
+    #[tokio::test()]
+    async fn test_read_table_from_location() {
+        let object_store: Arc<DynObjectStore> =
+            Arc::new(LocalFileSystem::new_with_prefix("test/data/table1").unwrap());
+
+        let table = Table::get_filesystem_table(2, object_store).await.unwrap();
+        let metadata = table.metadata;
+
+        assert_eq!(metadata.format_version(), FormatVersion::V2);
+
+        let manifests = table.manifests;
+        for manifest in manifests {
+            assert_eq!(manifest.added_data_files_count(), Some(3));
+        }
+    }
 }

@@ -1,0 +1,75 @@
+{
+  "format-version" : 2,
+  "table-uuid" : "db880616-a126-4d33-bd7c-b2ee7be71637",
+  "location" : "/Users/liangchi/repos/spark-1/warehouse/db/table1",
+  "last-sequence-number" : 1,
+  "last-updated-ms" : 1672096529024,
+  "last-column-id" : 2,
+  "current-schema-id" : 0,
+  "schemas" : [ {
+    "type" : "struct",
+    "schema-id" : 0,
+    "fields" : [ {
+      "id" : 1,
+      "name" : "id",
+      "required" : false,
+      "type" : "long"
+    }, {
+      "id" : 2,
+      "name" : "data",
+      "required" : false,
+      "type" : "string"
+    } ]
+  } ],
+  "default-spec-id" : 0,
+  "partition-specs" : [ {
+    "spec-id" : 0,
+    "fields" : [ ]
+  } ],
+  "last-partition-id" : 999,
+  "default-sort-order-id" : 0,
+  "sort-orders" : [ {
+    "order-id" : 0,
+    "fields" : [ ]
+  } ],
+  "properties" : {
+    "owner" : "liangchi"
+  },
+  "current-snapshot-id" : 5320644740794187860,
+  "refs" : {
+    "main" : {
+      "snapshot-id" : 5320644740794187860,
+      "type" : "branch"
+    }
+  },
+  "snapshots" : [ {
+    "sequence-number" : 1,
+    "snapshot-id" : 5320644740794187860,
+    "timestamp-ms" : 1672096529024,
+    "summary" : {
+      "operation" : "append",
+      "spark.app.id" : "local-1672096471210",
+      "added-data-files" : "3",
+      "added-records" : "3",
+      "added-files-size" : "1929",
+      "changed-partition-count" : "1",
+      "total-records" : "3",
+      "total-files-size" : "1929",
+      "total-data-files" : "3",
+      "total-delete-files" : "0",
+      "total-position-deletes" : "0",
+      "total-equality-deletes" : "0"
+    },
+    "manifest-list" : "/Users/liangchi/repos/spark-1/warehouse/db/table1/metadata/snap-5320644740794187860-1-662de847-f0ff-4cb7-9593-03fd3c876926.avro",
+    "schema-id" : 0
+  } ],
+  "statistics" : [ ],
+  "snapshot-log" : [ {
+    "timestamp-ms" : 1672096529024,
+    "snapshot-id" : 5320644740794187860
+  } ],
+  "metadata-log" : [ {
+    "timestamp-ms" : 1672096525460,
+    "metadata-file" : "/Users/liangchi/repos/spark-1/warehouse/db/table1/metadata/v1.metadata.json"
+  } ]
+}
