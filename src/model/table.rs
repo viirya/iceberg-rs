@@ -3,7 +3,7 @@ Defines the [table metadata](https://iceberg.apache.org/spec/#table-metadata).
 The main struct here is [TableMetadataV2] which defines the data for a table.
 */
 use anyhow::{anyhow, Result};
-use object_store::ObjectStore;
+use object_store::DynObjectStore;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
@@ -29,7 +29,7 @@ impl TableMetadata {
     /// Reads metadata file from provided location and object store.
     pub async fn get_metadata(
         location: &str,
-        object_store: &Arc<dyn ObjectStore>,
+        object_store: &Arc<DynObjectStore>,
     ) -> Result<TableMetadata> {
         let bytes: Cursor<Vec<u8>> = Cursor::new(
             object_store

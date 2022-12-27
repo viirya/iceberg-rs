@@ -66,7 +66,7 @@ impl ManifestMetadata {
         match format_version {
             Some(FormatVersion::V2) => {
                 let schema = read_string("schema")?.context("Metadata must have table schema")?;
-                let schema_id = read_string("schema-id")?.unwrap();
+                let schema_id = read_string("schema-id")?;
                 let partition_spec = read_string("partition-spec")?.unwrap();
                 let partition_spec_id = read_string("partition-spec-id")?.unwrap();
                 let content: Content = reader
@@ -98,7 +98,9 @@ pub struct ManifestMetadataV2 {
     pub schema: String,
     /// ID of the schema used to write the manifest as a string
     /// Should this be typed into a
-    pub schema_id: String,
+    /// Question: according to the spec, this is required for v2, but it is not found
+    /// in iceberg table created by Iceberg Spark.
+    pub schema_id: Option<String>,
     /// JSON fields representation of the partition spec used to write the manifest
     pub partition_spec: String,
     /// ID of the partition spec used to write the manifest as a string
@@ -214,6 +216,12 @@ impl ManifestEntry {
     pub fn file_path(&self) -> &str {
         match self {
             ManifestEntry::V2(entry) => &entry.data_file.file_path,
+        }
+    }
+    /// File format for the file with a FS scheme.
+    pub fn file_format(&self) -> &FileFormat {
+        match self {
+            ManifestEntry::V2(entry) => &entry.data_file.file_format,
         }
     }
     /// Total file size in bytes
@@ -975,7 +983,7 @@ mod tests {
             let reader = apache_avro::Reader::new( &encoded[..]).unwrap();
             let ManifestMetadata::V2(metadata) = ManifestMetadata::read_from_avro(&reader).unwrap();
             assert_eq!(metadata.schema, table_schema.to_string());
-            assert_eq!(metadata.schema_id, table_schema_id.to_string());
+            assert_eq!(metadata.schema_id, Some(table_schema_id.to_string()));
             assert_eq!(metadata.partition_spec, partition_spec.to_string());
             assert_eq!(metadata.partition_spec_id, partition_spec_id.to_string());
             assert_eq!(metadata.format_version, format_version);

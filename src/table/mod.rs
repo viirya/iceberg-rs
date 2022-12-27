@@ -2,12 +2,14 @@
 Iceberg table.
  */
 
+use crate::model::manifest::{Content, FileFormat, Manifest, ManifestMetadata};
 use crate::model::manifest_list::{ManifestFile, ManifestFileV2};
 use crate::model::table::{FormatVersion, TableMetadata};
 use crate::table::TableType::FileSystem;
 use anyhow::Result;
 use apache_avro::types::Value;
-use object_store::ObjectStore;
+use futures::future::join_all;
+use object_store::{DynObjectStore, ObjectStore};
 use std::io::Cursor;
 use std::sync::Arc;
 
@@ -35,8 +37,9 @@ pub struct Table {
 const METADATA_FOLDER: &str = "metadata";
 
 impl Table {
-    /// Returns filesystem table from given metadata location.
-    pub async fn get_filesystem_table(version: u64, fs: Arc<dyn ObjectStore>) -> Result<Table> {
+    /// Returns filesystem table from given metadata location specified as the root of provided
+    /// object store.
+    pub async fn get_filesystem_table(version: u64, fs: Arc<DynObjectStore>) -> Result<Table> {
         let metadata_location = format!("{METADATA_FOLDER}/v{version}.metadata.json");
         let metadata = TableMetadata::get_metadata(&metadata_location, &fs).await?;
         let manifests = Table::get_manifests(&metadata, &fs).await?;
@@ -49,12 +52,70 @@ impl Table {
         })
     }
 
+    /// Returns the file system of this table.
+    pub fn get_filesystem(&self) -> Result<Arc<DynObjectStore>> {
+        match &self.table_type {
+            FileSystem(fs) => Ok(fs.clone()),
+        }
+    }
+
+    async fn read_manifest(&self, manifest_file: &ManifestFile) -> Result<Manifest> {
+        let object_store = self.get_filesystem()?;
+        let manifest_path = manifest_file.manifest_path();
+        let table_location = self.metadata.location();
+        let relative_path = manifest_path.trim_start_matches(table_location);
+
+        let bytes: Cursor<Vec<u8>> = Cursor::new(
+            object_store
+                .get(&relative_path.into())
+                .await
+                .map_err(anyhow::Error::msg)?
+                .bytes()
+                .await?
+                .into(),
+        );
+
+        Manifest::read_manifest(bytes)
+    }
+
+    /// Returns a list of parquet files from data files in this table.
+    pub async fn get_parquet_files(&self) -> Result<Vec<String>> {
+        let futures = self
+            .manifests
+            .iter()
+            .map(|manifest_file| async {
+                let manifest = self.read_manifest(manifest_file).await?;
+                let ManifestMetadata::V2(metadata) = manifest.metadata;
+
+                if metadata.content == Content::Data
+                    && manifest.entry.file_format() == &FileFormat::Parquet
+                {
+                    Ok(manifest.entry.file_path().to_string())
+                } else {
+                    Err(anyhow::Error::msg("Can only get parquet files."))
+                }
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let results = join_all(futures).await;
+        let mut parquet_files: Vec<String> = vec![];
+
+        for r in results {
+            match r {
+                Err(e) => return Err(e),
+                Ok(file) => parquet_files.push(file),
+            }
+        }
+        Ok(parquet_files)
+    }
+
     /// Return all manifest files associated to the latest table snapshot.
     /// Reads the related manifest_list file and returns its entries.
     /// If the manifest list file is empty returns an empty vector.
     pub(crate) async fn get_manifests(
         metadata: &TableMetadata,
-        object_store: &Arc<dyn ObjectStore>,
+        object_store: &Arc<DynObjectStore>,
     ) -> Result<Vec<ManifestFile>> {
         match metadata.manifest_list() {
             Some(manifest_list) => {
@@ -122,5 +183,15 @@ mod tests {
         for manifest in manifests {
             assert_eq!(manifest.added_data_files_count(), Some(3));
         }
+    }
+
+    #[tokio::test()]
+    async fn test_read_parquet_files_from_table() {
+        let object_store: Arc<DynObjectStore> =
+            Arc::new(LocalFileSystem::new_with_prefix("test/data/table1").unwrap());
+
+        let table = Table::get_filesystem_table(2, object_store).await.unwrap();
+        let files = table.get_parquet_files().await.unwrap();
+        assert_eq!(files.len(), 1);
     }
 }

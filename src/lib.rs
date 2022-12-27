@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![feature(async_closure)]
 /*!
 # Iceberg-rs
 
