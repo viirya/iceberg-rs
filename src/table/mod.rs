@@ -53,15 +53,40 @@ const METADATA_FOLDER: &str = "metadata";
 impl Table {
     /// Returns filesystem table from given metadata location specified as the root of provided
     /// object store.
-    pub async fn get_filesystem_table(version: u64, fs: Arc<DynObjectStore>) -> Result<Table> {
+    pub async fn get_current_filesystem_table(
+        version: u64,
+        fs: Arc<DynObjectStore>,
+    ) -> Result<Table> {
         let metadata_location = format!("{METADATA_FOLDER}/v{version}.metadata.json");
         let metadata = TableMetadata::get_metadata(&metadata_location, &fs).await?;
-        let manifests = Table::get_manifests(&metadata, &fs).await?;
+        let snapshot_id = metadata.get_current_snapshot_id().clone();
+        Table::get_filesystem_table_internal(metadata, fs, snapshot_id).await
+    }
+
+    /// Returns filesystem table from given metadata location specified as the root of provided
+    /// object store.
+    pub async fn get_filesystem_table(
+        version: u64,
+        fs: Arc<DynObjectStore>,
+        snapshot_id: Option<i64>,
+    ) -> Result<Table> {
+        let metadata_location = format!("{METADATA_FOLDER}/v{version}.metadata.json");
+        let metadata = TableMetadata::get_metadata(&metadata_location, &fs).await?;
+        Table::get_filesystem_table_internal(metadata, fs, snapshot_id).await
+    }
+
+    async fn get_filesystem_table_internal(
+        metadata: TableMetadata,
+        fs: Arc<DynObjectStore>,
+        snapshot_id: Option<i64>,
+    ) -> Result<Table> {
+        let metadata_location = metadata.location().to_string();
+        let manifests = Table::get_manifests(&metadata, snapshot_id, &fs).await?;
 
         Ok(Self {
             table_type: FileSystem(fs),
             metadata,
-            metadata_location: metadata_location.to_string(),
+            metadata_location,
             manifests,
         })
     }
@@ -141,9 +166,10 @@ impl Table {
     /// If the manifest list file is empty returns an empty vector.
     pub(crate) async fn get_manifests(
         metadata: &TableMetadata,
+        snapshot_id: Option<i64>,
         object_store: &Arc<DynObjectStore>,
     ) -> Result<Vec<ManifestFile>> {
-        match metadata.manifest_list() {
+        match metadata.manifest_list(snapshot_id) {
             Some(manifest_list) => {
                 let relative_path = manifest_list.trim_start_matches(metadata.location());
 
@@ -320,7 +346,9 @@ mod tests {
         let object_store: Arc<DynObjectStore> =
             Arc::new(LocalFileSystem::new_with_prefix("test/data/table1").unwrap());
 
-        let table = Table::get_filesystem_table(2, object_store).await.unwrap();
+        let table = Table::get_current_filesystem_table(2, object_store)
+            .await
+            .unwrap();
         let metadata = table.metadata;
 
         assert_eq!(metadata.format_version(), FormatVersion::V2);
@@ -336,7 +364,15 @@ mod tests {
         let object_store: Arc<DynObjectStore> =
             Arc::new(LocalFileSystem::new_with_prefix("test/data/table1").unwrap());
 
-        let table = Table::get_filesystem_table(2, object_store).await.unwrap();
+        let table = Table::get_current_filesystem_table(1, object_store.clone())
+            .await
+            .unwrap();
+        let files = table.get_parquet_files().await.unwrap();
+        assert_eq!(files.len(), 0);
+
+        let table = Table::get_current_filesystem_table(2, object_store)
+            .await
+            .unwrap();
         let files = table.get_parquet_files().await.unwrap();
         assert_eq!(files.len(), 1);
     }
@@ -346,7 +382,9 @@ mod tests {
         let object_store: Arc<DynObjectStore> =
             Arc::new(LocalFileSystem::new_with_prefix("test/data/table1").unwrap());
 
-        let table = Table::get_filesystem_table(2, object_store).await.unwrap();
+        let table = Table::get_current_filesystem_table(2, object_store)
+            .await
+            .unwrap();
         let stream = table.read_batches().await.unwrap();
         let result = stream.try_collect::<Vec<_>>().await.unwrap();
         assert_eq!(result.len(), 1);

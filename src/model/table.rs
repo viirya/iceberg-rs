@@ -44,19 +44,28 @@ impl TableMetadata {
         Ok(TableMetadata::V2(metadata))
     }
 
-    /// Get the manifest_list for the current snapshot of the table
-    pub fn manifest_list(&self) -> Option<&str> {
+    /// Returns the optional current snapshot id.
+    pub fn get_current_snapshot_id(&self) -> &Option<i64> {
         match self {
-            TableMetadata::V2(metadata) => metadata
-                .snapshots
-                .as_ref()
-                .zip(metadata.current_snapshot_id.as_ref())
-                .and_then(|(snapshots, id)| {
-                    snapshots
-                        .iter()
-                        .find(|snapshot| snapshot.snapshot_id == *id)
-                        .map(|snapshot| snapshot.manifest_list.as_str())
-                }),
+            TableMetadata::V2(metadata) => &metadata.current_snapshot_id,
+        }
+    }
+
+    /// Get the manifest_list for the current snapshot of the table
+    pub fn manifest_list(&self, snapshot_id: Option<i64>) -> Option<&str> {
+        match self {
+            TableMetadata::V2(metadata) => {
+                metadata
+                    .snapshots
+                    .as_ref()
+                    .zip(snapshot_id)
+                    .and_then(|(snapshots, id)| {
+                        snapshots
+                            .iter()
+                            .find(|snapshot| snapshot.snapshot_id == id)
+                            .map(|snapshot| snapshot.manifest_list.as_str())
+                    })
+            }
         }
     }
 
