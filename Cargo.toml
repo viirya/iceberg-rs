@@ -18,9 +18,9 @@ serde_json = "1.0"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 regex = "1.5.5"
 lazy_static = "1.4.0"
-arrow-array = { path = "../arrow-rs/arrow-array", version = "29.0.0" }
-object_store = { path = "../arrow-rs/object_store", version = "0.5.2" }
-parquet = { path = "../arrow-rs/parquet", version = "29.0.0", features = ["object_store"] }
+arrow-array = { version = "30.0.0" }
+object_store = { version = "0.5.2" }
+parquet = { version = "30.0.0", features = ["object_store"] }
 apache-avro = "0.14.0"
 serde_bytes = "0.11.7"
 anyhow = "1.0"
